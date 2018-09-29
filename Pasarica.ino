@@ -1,8 +1,8 @@
 #include <SoftwareSerial.h>
 #include <ArduinoJson.h>
-#include <SmoothADC.h>
+#include <SimpleKalmanFilter.h>
 
-SmoothADC adc;
+SimpleKalmanFilter kf(10, 10, 0.01);
 SoftwareSerial BTSerial(8, 7);  // RX, TX
 const size_t jsonBufferSize = JSON_OBJECT_SIZE(1);
 DynamicJsonDocument doc;
@@ -13,17 +13,13 @@ double lastTemp = 0.0;
 
 void setup() {
   Serial.begin(9600);
-  Serial.println("Welcome! This is Pasarica v0.2a!");
+  Serial.println("Welcome! This is Pasarica v0.2b!");
   Serial.println("This device monitors the temperature of the hot water pipe");
   Serial.println("and sends the value to Home Assistant.");
   Serial.println("----------------------------------------------------------");
   Serial.println("Why \"Pasarica\"? Because \"O pasarica mi-a zis ca apa e gata de dus!\"");
   Serial.println("");
   BTSerial.begin(9600);
-  adc.init(1, TB_US, 500);
-  if (adc.isDisabled()) { 
-    adc.enable(); 
-  }
   Serial.println("Configuring Bluetooth LE module...");
   BTSerial.write("AT+RESET\r\n");
   BTSerial.write("AT+NAME=Pasarica\r\n");
@@ -32,20 +28,20 @@ void setup() {
 
 void loop()
 {
-  adc.serviceADCPin();
-
+  int estValue = kf.updateEstimate(analogRead(1));
+  
   unsigned long currentMillis = millis();
   if (currentMillis - previousMillis >= interval) {
-    previousMillis = currentMillis;
-
-    double temp = round((adc.getADCVal() * 0.48828125)* 100) / 100.0;
-    if (fabs(lastTemp-temp) > 1.0) {
+    double temp = round((estValue * 0.48828125)* 100) / 100.0;
+    if (temp != lastTemp) {
       JsonObject root = doc.to<JsonObject>();
       root["temp"] = temp;
       serializeJson(doc, BTSerial);
       lastTemp = temp;
       //serializeJson(doc, Serial); Serial.println();
     }
+
+    previousMillis = currentMillis;
   }
   
   if (BTSerial.available()) {
